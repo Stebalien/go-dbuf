@@ -11,6 +11,7 @@ import (
 )
 
 const size = 256
+const bufsize = 1024 * 256
 
 func tcpPipe(t testing.TB) (net.Conn, net.Conn) {
 	list, err := net.Listen("tcp", "127.0.0.1:0")
@@ -57,7 +58,7 @@ func doTest(t testing.TB, data []byte, out io.WriteCloser, in io.ReadCloser) {
 }
 
 func BenchmarkDBuf(t *testing.B) {
-	var data [1024 * 1024]byte
+	var data [bufsize]byte
 
 	if _, err := rand.Read(data[:]); err != nil {
 		t.Fatal(err)
@@ -76,7 +77,7 @@ func BenchmarkDBuf(t *testing.B) {
 }
 
 func BenchmarkNormal(t *testing.B) {
-	var data [1024 * 1024]byte
+	var data [bufsize]byte
 
 	if _, err := rand.Read(data[:]); err != nil {
 		t.Fatal(err)
@@ -112,7 +113,7 @@ func (b *BufWriteCloser) Write(buf []byte) (int, error) {
 }
 
 func BenchmarkBuf(t *testing.B) {
-	var data [1024 * 1024]byte
+	var data [bufsize]byte
 
 	if _, err := rand.Read(data[:]); err != nil {
 		t.Fatal(err)
