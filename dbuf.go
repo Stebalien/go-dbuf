@@ -115,30 +115,6 @@ func (w *writer) Write(buf []byte) (int, error) {
 	return length, nil
 }
 
-func (w *writer) Flush() error {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	if w.err != nil {
-		return w.err
-	}
-	for w.writing {
-		w.cond.Wait()
-		if w.err != nil {
-			return w.err
-		}
-	}
-	if w.err != nil {
-		return w.err
-	}
-	if w.buf != nil {
-		err := w.writeAndReturn(w.buf)
-		if err != nil {
-			w.setErr(err)
-		}
-	}
-	return w.err
-}
-
 func (w *writer) Close() error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
