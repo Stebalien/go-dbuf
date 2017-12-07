@@ -18,6 +18,7 @@ type writer struct {
 	err     error
 	writing bool
 	buf     []byte
+	closing bool
 	cond    sync.Cond
 	mu      sync.Mutex
 }
@@ -49,7 +50,6 @@ func (w *writer) writeDirect(buf []byte) (int, error) {
 			return 0, w.err
 		}
 		w.buf = nil
-		w.cond.Broadcast()
 		if w.err != nil {
 			return 0, w.err
 		}
@@ -94,14 +94,16 @@ func (w *writer) Write(buf []byte) (int, error) {
 	}
 	if w.buf != nil {
 		// Fill existing buffer
+		// No need to notify the write loop, that has already happened.
 		written := copy(w.buf[len(w.buf):cap(w.buf)], buf)
 		w.buf = w.buf[:len(w.buf)+written]
 		// Leftover bytes.
 		buf = buf[written:]
-		w.cond.Broadcast()
 		if len(buf) == 0 {
 			return length, nil
 		}
+		// If we've filled it, wait for the write loop to take the
+		// buffer from us.
 		for w.buf != nil {
 			w.cond.Wait()
 			if w.err != nil {
@@ -111,6 +113,7 @@ func (w *writer) Write(buf []byte) (int, error) {
 	}
 	w.buf = mpool.ByteSlicePool.Get(BufferSize).([]byte)[:len(buf)]
 	copy(w.buf, buf)
+	// Notify write loop that we have a new buffer ready.
 	w.cond.Broadcast()
 	return length, nil
 }
@@ -122,6 +125,7 @@ func (w *writer) Close() error {
 	if w.err != nil {
 		return w.err
 	}
+	w.closing = true
 	for w.writing {
 		w.cond.Wait()
 		if w.err != nil {
@@ -138,12 +142,14 @@ func (w *writer) Close() error {
 			w.err = err
 		}
 	}
-	w.cond.Broadcast()
-	if w.err == nil {
+	err := w.err
+	if err == nil {
 		w.err = ErrClosed
-		return nil
 	}
-	return w.err
+	// Interrupt the write loop and any concurrent writers.
+	// Now that err is set, they'll all bail.
+	w.cond.Broadcast()
+	return err
 }
 
 func (w *writer) writeAndReturn(buf []byte) error {
@@ -160,6 +166,8 @@ func (w *writer) writeAndReturn(buf []byte) error {
 func (w *writer) writeLoop() {
 	w.mu.Lock()
 	defer w.mu.Unlock()
+	// Tells anything closing this that we've finished
+	defer w.cond.Broadcast()
 
 	var err error
 	for {
@@ -171,7 +179,9 @@ func (w *writer) writeLoop() {
 			w.setErr(err)
 			return
 		}
-		w.cond.Broadcast()
+		if w.closing {
+			return
+		}
 		for w.buf == nil {
 			w.cond.Wait()
 			if w.err != nil {

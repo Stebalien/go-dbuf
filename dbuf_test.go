@@ -34,7 +34,7 @@ func tcpPipe(t testing.TB) (net.Conn, net.Conn) {
 
 var pipe = tcpPipe
 
-// var pipe = io.Pipe
+//var pipe = func(testing.TB) (io.ReadCloser, io.WriteCloser) { return io.Pipe() }
 
 func doTest(t testing.TB, data []byte, out io.WriteCloser, in io.ReadCloser) {
 	go func(data []byte) {
