@@ -13,7 +13,8 @@ const BufferSize = 4096
 // ErrClosed is an error returned when operating on a closed writer.
 var ErrClosed = errors.New("writer closed")
 
-type writer struct {
+// Writer is an auto-buffered write adapter
+type Writer struct {
 	inner   io.Writer
 	err     error
 	writing bool
@@ -23,8 +24,9 @@ type writer struct {
 	mu      sync.Mutex
 }
 
-func NewWriter(w io.Writer) io.WriteCloser {
-	bw := &writer{
+// NewWriter constructs a new auto-buffered Writer.
+func NewWriter(w io.Writer) *Writer {
+	bw := &Writer{
 		inner: w,
 	}
 	bw.cond.L = &bw.mu
@@ -32,7 +34,7 @@ func NewWriter(w io.Writer) io.WriteCloser {
 	return bw
 }
 
-func (w *writer) writeDirect(buf []byte) (int, error) {
+func (w *Writer) writeDirect(buf []byte) (int, error) {
 	for w.writing {
 		w.cond.Wait()
 		if w.err != nil {
@@ -67,7 +69,7 @@ func (w *writer) writeDirect(buf []byte) (int, error) {
 	return written, nil
 }
 
-func (w *writer) setErr(err error) {
+func (w *Writer) setErr(err error) {
 	if w.err != nil {
 		w.err = err
 		if wc, ok := w.inner.(io.WriteCloser); ok {
@@ -81,7 +83,11 @@ func (w *writer) setErr(err error) {
 	}
 }
 
-func (w *writer) Write(buf []byte) (int, error) {
+// Write writes to the underlying writer, buffering as necessary.
+//
+// Thread-safety: Write is *not* thread-safe. Do not write from multiple
+// threads.
+func (w *Writer) Write(buf []byte) (int, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
@@ -118,7 +124,11 @@ func (w *writer) Write(buf []byte) (int, error) {
 	return length, nil
 }
 
-func (w *writer) Close() error {
+// Close flushes the Writer and, if the underlying writer implements
+// `io.Closer`, it closes it.
+//
+// Thread-safety: Close is thread-safe.
+func (w *Writer) Close() error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
@@ -152,7 +162,7 @@ func (w *writer) Close() error {
 	return err
 }
 
-func (w *writer) writeAndReturn(buf []byte) error {
+func (w *Writer) writeAndReturn(buf []byte) error {
 	var err error
 	var written, n int
 	for err == nil && written < len(buf) {
@@ -163,7 +173,7 @@ func (w *writer) writeAndReturn(buf []byte) error {
 	return err
 }
 
-func (w *writer) writeLoop() {
+func (w *Writer) writeLoop() {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	// Tells anything closing this that we've finished
