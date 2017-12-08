@@ -16,10 +16,9 @@ var ErrClosed = errors.New("writer closed")
 // Writer is an auto-buffered write adapter
 type Writer struct {
 	inner   io.Writer
-	err     error
 	writing bool
+	err     error
 	buf     []byte
-	closing bool
 	cond    sync.Cond
 	mu      sync.Mutex
 }
@@ -35,23 +34,25 @@ func NewWriter(w io.Writer) *Writer {
 }
 
 func (w *Writer) writeDirect(buf []byte) (int, error) {
+	// Steal the buffer and write it here.
+	curBuf := w.buf
+	w.buf = nil
 	for w.writing {
 		w.cond.Wait()
 		if w.err != nil {
+			if curBuf != nil {
+				mpool.ByteSlicePool.Put(BufferSize, curBuf)
+			}
 			return 0, w.err
 		}
 	}
-	if w.err != nil {
-		return 0, w.err
-	}
-	if w.buf != nil {
+	if curBuf != nil {
 		// Write this ourselves. No need to wait for go to
 		// schedule the other goroutine.
-		if err := w.writeAndReturn(w.buf); err != nil {
+		if err := w.writeAndReturn(curBuf); err != nil {
 			w.setErr(err)
 			return 0, w.err
 		}
-		w.buf = nil
 		if w.err != nil {
 			return 0, w.err
 		}
@@ -135,7 +136,6 @@ func (w *Writer) Close() error {
 	if w.err != nil {
 		return w.err
 	}
-	w.closing = true
 	for w.writing {
 		w.cond.Wait()
 		if w.err != nil {
@@ -144,6 +144,7 @@ func (w *Writer) Close() error {
 	}
 	if w.buf != nil {
 		w.err = w.writeAndReturn(w.buf)
+		w.buf = nil
 	}
 	if wc, ok := w.inner.(io.WriteCloser); ok {
 		err := wc.Close()
@@ -176,22 +177,13 @@ func (w *Writer) writeAndReturn(buf []byte) error {
 func (w *Writer) writeLoop() {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	// Tells anything closing this that we've finished
-	defer w.cond.Broadcast()
+
+	if w.err != nil {
+		return
+	}
 
 	var err error
 	for {
-		w.writing = false
-		if w.err != nil {
-			return
-		}
-		if err != nil {
-			w.setErr(err)
-			return
-		}
-		if w.closing {
-			return
-		}
 		for w.buf == nil {
 			w.cond.Wait()
 			if w.err != nil {
@@ -199,12 +191,28 @@ func (w *Writer) writeLoop() {
 			}
 		}
 		buf := w.buf
-		w.buf = nil
-		w.writing = true
 
-		w.mu.Unlock()
+		// Ready for a value
+		w.buf = nil
 		w.cond.Broadcast()
+
+		w.writing = true
+		w.mu.Unlock()
+
 		err = w.writeAndReturn(buf)
 		w.mu.Lock()
+		w.writing = false
+
+		// Done writing, notify.
+		w.cond.Broadcast()
+
+		if w.err != nil {
+			return
+		}
+
+		if err != nil {
+			w.setErr(err)
+			return
+		}
 	}
 }
