@@ -208,8 +208,10 @@ func (w *Writer) writeLoop() {
 				return
 			}
 		}
+		sleeps := 0
 		// If we're trying to send less than 512B, try waiting a bit.
-		for len(w.buf) < SmallWriteSize {
+		// Limit to 10 microseconds of "sleep" time.
+		for len(w.buf) < SmallWriteSize && sleeps < 10 {
 			curLen := len(w.buf)
 
 			// Fast
