@@ -4,11 +4,16 @@ import (
 	"errors"
 	"github.com/libp2p/go-msgio/mpool"
 	"io"
+	"runtime"
 	"sync"
+	"time"
 )
 
-// Default Buffer Size
+// BufferSize is the maximum amount of data we'll buffer before sending.
 const BufferSize = 4096
+
+// SmallWriteSize is the point at which we'll try waiting a bit before sending more data.
+const SmallWriteSize = BufferSize / 8
 
 // ErrClosed is an error returned when operating on a closed writer.
 var ErrClosed = errors.New("writer closed")
@@ -202,6 +207,27 @@ func (w *Writer) writeLoop() {
 			if w.err != nil {
 				return
 			}
+		}
+		// If we're trying to send less than 512B, try waiting a bit.
+		for len(w.buf) < SmallWriteSize {
+			curLen := len(w.buf)
+
+			// Fast
+			w.mu.Unlock()
+			runtime.Gosched()
+			w.mu.Lock()
+			if curLen != len(w.buf) {
+				continue
+			}
+
+			// Slow
+			w.mu.Unlock()
+			time.Sleep(time.Microsecond)
+			w.mu.Lock()
+			if curLen != len(w.buf) {
+				continue
+			}
+			break
 		}
 		buf := w.buf
 
