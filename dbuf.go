@@ -125,6 +125,19 @@ func (w *Writer) Write(buf []byte) (int, error) {
 	return length, nil
 }
 
+// Flush waits for any buffered data to be written.
+//
+// Thread-safety: Flush is not thread-safe. It should not be called concurrently
+// with either itself or Write.
+func (w *Writer) Flush() error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	for w.err == nil && (w.writing || w.buf != nil) {
+		w.cond.Wait()
+	}
+	return w.err
+}
+
 // Close flushes the Writer and, if the underlying writer implements
 // `io.Closer`, it closes it.
 //
