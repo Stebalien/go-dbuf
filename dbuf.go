@@ -16,6 +16,12 @@ const BufferSize = 4096
 // SmallWriteSize is the point at which we'll try waiting a bit before sending more data.
 const SmallWriteSize = BufferSize / 8
 
+// SmallWriteSleepTime is the time to sleep before attempts to coalesce buffers
+var SmallWriteSleepTime = time.Microsecond
+
+// SmallWriteTicks is the number of sleeps between writing a small buffer
+var SmallWriteTicks = 10
+
 // ErrClosed is an error returned when operating on a closed writer.
 var ErrClosed = errors.New("writer closed")
 
@@ -211,8 +217,8 @@ func (w *Writer) writeLoop() {
 		}
 		sleeps := 0
 		// If we're trying to send less than 512B, try waiting a bit.
-		// Limit to 10 microseconds of "sleep" time.
-		for len(w.buf) < SmallWriteSize && sleeps < 10 {
+		// Limit to SmallWriteTicks * SmallWriteSleepTime of "sleep" time.
+		for len(w.buf) < SmallWriteSize && sleeps < SmallWriteTicks {
 			curLen := len(w.buf)
 
 			// Fast
@@ -225,7 +231,7 @@ func (w *Writer) writeLoop() {
 
 			// Slow
 			w.mu.Unlock()
-			time.Sleep(time.Microsecond)
+			time.Sleep(SmallWriteSleepTime)
 			w.mu.Lock()
 			if curLen != len(w.buf) {
 				continue
