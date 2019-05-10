@@ -2,11 +2,12 @@ package dbuf
 
 import (
 	"errors"
-	"github.com/libp2p/go-msgio/mpool"
 	"io"
 	"runtime"
 	"sync"
 	"time"
+
+	"github.com/libp2p/go-buffer-pool"
 )
 
 // BufferSize is the maximum amount of data we'll buffer before sending.
@@ -46,7 +47,7 @@ func (w *Writer) writeDirect(buf []byte) (int, error) {
 		w.cond.Wait()
 		if w.err != nil {
 			if curBuf != nil {
-				mpool.ByteSlicePool.Put(BufferSize, curBuf)
+				pool.Put(curBuf)
 			}
 			return 0, w.err
 		}
@@ -82,7 +83,7 @@ func (w *Writer) setErr(err error) {
 			wc.Close()
 		}
 		if w.buf != nil {
-			mpool.ByteSlicePool.Put(BufferSize, w.buf)
+			pool.Put(w.buf)
 			w.buf = nil
 		}
 		w.cond.Broadcast()
@@ -123,7 +124,7 @@ func (w *Writer) Write(buf []byte) (int, error) {
 			}
 		}
 	}
-	w.buf = mpool.ByteSlicePool.Get(BufferSize).([]byte)[:len(buf)]
+	w.buf = pool.Get(BufferSize)[:len(buf)]
 	copy(w.buf, buf)
 	// Notify write loop that we have a new buffer ready.
 	w.cond.Broadcast()
@@ -188,7 +189,7 @@ func (w *Writer) writeAndReturn(buf []byte) error {
 		n, err = w.inner.Write(buf[written:])
 		written += n
 	}
-	mpool.ByteSlicePool.Put(BufferSize, buf)
+	pool.Put(buf)
 	return err
 }
 
